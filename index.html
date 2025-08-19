@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>adreszoeker</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+:root{
+  --bg:#0b1220;--card:#0f172a;--fg:#e2e8f0;--muted:#94a3b8;
+  --brand:#3b82f6;--range:#2563eb;--rangeBg:#1f2937;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto;background:var(--bg);color:var(--fg)}
+.wrap{max-width:960px;margin:0 auto;padding:20px}
+header{display:flex;align-items:center;gap:14px;padding:6px 0 12px}
+header .logo{width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#60a5fa,#1d4ed8);display:grid;place-items:center;font-weight:800;color:#fff}
+h1{margin:0;cursor:pointer;user-select:none}
+.card{background:var(--card);border-radius:16px;padding:18px;margin-bottom:16px;border:1px solid rgba(255,255,255,.07)}
+.field{margin-bottom:14px}
+input,button,select{width:100%;padding:12px;border-radius:10px;border:1px solid #333;background:#0b1220;color:#fff;font-size:15px}
+button{background:var(--brand);border:0;font-weight:700;cursor:pointer}
+.label-below{font-size:13px;color:var(--muted);margin-top:6px}
+
+/* Slider (custom, no thumbs) */
+.range-wrap{margin:10px 0}
+.range-track{position:relative;height:14px;border-radius:14px;background:var(--rangeBg);}
+.range-fill{position:absolute;top:0;bottom:0;border-radius:14px;background:var(--range)}
+.range-hit{position:absolute;left:0;top:0;right:0;bottom:0;cursor:ew-resize}
+.range-info{display:flex;justify-content:space-between;color:var(--muted);font-size:13px;margin-top:8px}
+
+.result{padding:12px;border:1px dashed #444;margin-top:8px;border-radius:10px}
+#map{height:320px;margin-top:12px;border-radius:12px}
+.hidden{display:none}
+.row{display:flex;gap:10px;align-items:center}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.admin{display:none;background:#0b1220;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:12px;margin-top:12px}
+
+/* Copy button */
+.copybtn{background:none;border:1px solid #334155;color:#e2e8f0;cursor:pointer;border-radius:8px;padding:6px 8px;display:inline-flex;align-items:center;gap:6px}
+.copybtn svg{width:14px;height:14px;vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><div class="logo">AZ</div><h1 id="appTitle" title="Houd 1s ingedrukt voor admin">adreszoeker</h1></header>
+
+  <section class="card">
+    <div class="field">
+      <input id="pc" placeholder="1234AB" autocomplete="postal-code">
+      <div class="label-below">Postcode</div>
+    </div>
+    <div class="field">
+      <input id="hn" placeholder="10" inputmode="numeric">
+      <div class="label-below">Huisnummer</div>
+    </div>
+
+    <div class="field">
+      <div class="range-wrap">
+        <div class="range-track" id="track">
+          <div id="rFill" class="range-fill"></div>
+          <div class="range-hit" id="hit"></div>
+        </div>
+        <div class="range-info"><span>van: <span id="minVal">5</span> km</span><span>tot: <span id="maxVal">15</span> km</span></div>
+      </div>
+    </div>
+
+    <button id="btnFind">Zoek adres</button>
+    <div id="origin" class="result hidden"></div>
+    <div id="target" class="result hidden"></div>
+    <div id="map" class="hidden"></div>
+
+    <div id="admin" class="admin">
+      <div style="font-size:13px;color:#93c5fd;margin-bottom:6px">Admin</div>
+      <div class="field"><input id="curUrl" readonly></div>
+      <div class="row"><button id="btnCopy">Kopieer URL</button><button id="btnShare">Deel URL</button></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row" style="gap:10px">
+      <div style="flex:1;min-width:0">
+        <label class="label-below" style="margin:0 0 6px 0">Kies een bank</label>
+        <select id="bank" style="width:100%"></select>
+      </div>
+      <button id="btnGen" style="flex:1;min-width:0">Genereer</button>
+    </div>
+    <!-- IBAN direct onder het keuzeveld tonen zoals v6 -->
+    <div id="ibanBox" class="mono" style="margin-top:8px;white-space:nowrap;overflow-x:auto" aria-live="polite"></div>
+    <div class="row" style="margin-top:6px">
+      <button id="copyIban" class="copybtn" title="Kopieer IBAN">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="9" y="9" width="13" height="13" rx="2"></rect>
+          <rect x="3" y="3" width="13" height="13" rx="2"></rect>
+        </svg>
+        Kopieer
+      </button>
+    </div>
+  </section>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// -------- Range (custom drag, no thumbs) --------
+let minKm=5, maxKm=15;
+const MIN=0, MAX=50, STEP=1;
+const track=document.getElementById('track');
+const fill=document.getElementById('rFill');
+const hit=document.getElementById('hit');
+const minVal=document.getElementById('minVal');
+const maxVal=document.getElementById('maxVal');
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function pct(v){return (v-MIN)/(MAX-MIN);}
+function valFromX(clientX){
+  const rect=track.getBoundingClientRect();
+  const x=clamp(clientX-rect.left,0,rect.width);
+  let v = MIN + (x/rect.width) * (MAX-MIN);
+  v = Math.round(v/STEP)*STEP;
+  return clamp(v,MIN,MAX);
+}
+function renderRange(){
+  const l=pct(minKm)*100, r=pct(maxKm)*100;
+  fill.style.left = l + '%';
+  fill.style.width = (r-l) + '%';
+  minVal.textContent=minKm;
+  maxVal.textContent=maxKm;
+}
+let dragging=null; // 'min' | 'max'
+function onPointerDown(e){
+  const clientX = (e.touches && e.touches[0]?.clientX) || e.clientX;
+  const v=valFromX(clientX);
+  const chooseMin = Math.abs(v-minKm) <= Math.abs(v-maxKm);
+  dragging = chooseMin ? 'min' : 'max';
+  updateDrag(e);
+  window.addEventListener('pointermove', updateDrag);
+  window.addEventListener('pointerup', endDrag, {once:true});
+}
+function updateDrag(e){
+  if(!dragging) return;
+  const clientX = (e.touches && e.touches[0]?.clientX) || e.clientX;
+  const v=valFromX(clientX);
+  if(dragging==='min'){ minKm = Math.min(v, maxKm); }
+  else{ maxKm = Math.max(v, minKm); }
+  renderRange();
+}
+function endDrag(){ dragging=null; window.removeEventListener('pointermove', updateDrag); }
+hit.addEventListener('pointerdown', onPointerDown);
+hit.addEventListener('touchstart', (e)=>{ e.preventDefault(); onPointerDown(e); }, {passive:false});
+renderRange();
+
+// ------- Helpers -------
+const R=6371,toRad=d=>d*Math.PI/180,toDeg=r=>r*180/Math.PI;
+const normPC=pc=>(pc||"").toUpperCase().replace(/\s+/g,'');
+function parseLL(w){const m=w?.match(/POINT\(([-\d\.]+) ([-\d\.]+)\)/);return m?{lon:+m[1],lat:+m[2]}:null}
+function hav(a,b){const dLat=toRad(b.lat-a.lat),dLon=toRad(b.lon-a.lon),lat1=toRad(a.lat),lat2=toRad(b.lat);const h=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
+function dest(lat,lon,d,b){const dr=d/R,br=toRad(b),lat1=toRad(lat),lon1=toRad(lon);const lat2=Math.asin(Math.sin(lat1)*Math.cos(dr)+Math.cos(lat1)*Math.sin(dr)*Math.cos(br));const lon2=lon1+Math.atan2(Math.sin(br)*Math.sin(dr)*Math.cos(lat1),Math.cos(dr)-Math.sin(lat1)*Math.sin(lat2));return {lat:toDeg(lat2),lon:(toDeg(lon2)+540)%360-180}}
+
+// ------- PDOK -------
+async function pdokFree(pc,hn){
+  const u=new URL("https://api.pdok.nl/bzk/locatieserver/search/v3_1/free");
+  u.searchParams.set("q",pc+" "+hn);
+  u.searchParams.append("fq","type:adres");
+  u.searchParams.set("fl","centroide_ll,weergavenaam,straatnaam,huisnummer,huisletter,huisnummertoevoeging,woonplaatsnaam,postcode");
+  u.searchParams.set("rows","1");
+  const r=await fetch(u); if(!r.ok) return null;
+  const d=await r.json(); return d?.response?.docs?.[0]||null;
+}
+async function pdokRev(lat,lon){
+  const u=new URL("https://api.pdok.nl/bzk/locatieserver/search/v3_1/reverse");
+  u.searchParams.set("lat",lat); u.searchParams.set("lon",lon); u.searchParams.set("rows","1");
+  u.searchParams.append("fq","type:adres");
+  u.searchParams.set("fl","centroide_ll,weergavenaam,straatnaam,huisnummer,huisletter,huisnummertoevoeging,woonplaatsnaam,postcode");
+  const r=await fetch(u); if(!r.ok) return null;
+  const d=await r.json(); return d?.response?.docs?.[0]||null;
+}
+async function findInRange(o,min,max){
+  for(let i=0;i<28;i++){
+    const d=min+Math.random()*(max-min), b=Math.random()*360;
+    const p=dest(o.lat,o.lon,d,b); const c=await pdokRev(p.lat,p.lon); if(!c) continue;
+    const q=parseLL(c.centroide_ll); if(!q) continue;
+    const dd=hav(o,q); if(dd>=min && dd<=max) return {doc:c,pt:q,dist:dd};
+  }
+  return null;
+}
+
+// ------- IBAN (v6-stijl weergave, verder ongewijzigd) -------
+const banks=["RABO","INGB","ABNA","TRIO","SNSB","DEUT","BNPA","BNGH","BOFA"];
+document.getElementById('bank').innerHTML=banks.map(b=>`<option value="${b}">${b}</option>`).join('');
+function elf10(){function ok(ds){const w=[10,9,8,7,6,5,4,3,2,1];return ds.reduce((s,d,i)=>s+d*w[i],0)%11===0}
+  while(true){const ds=Array.from({length:10},(_,i)=> i===0 ? Math.floor(Math.random()*9)+1 : Math.floor(Math.random()*10)); if(ok(ds)) return ds.join('');}}
+function mod97(cc,bban){let s=bban+cc+'00'; s=s.replace(/[A-Z]/g,ch=>ch.charCodeAt(0)-55); let rem=0; for(const ch of s){rem=(rem*10+(ch.charCodeAt(0)-48))%97} return String(98-rem).padStart(2,'0')}
+const ibanBox=document.getElementById('ibanBox');
+document.getElementById('btnGen').addEventListener('click',()=>{
+  const bank=document.getElementById('bank').value;
+  const rek=elf10();
+  const bban=bank+rek;
+  const cd=mod97('NL',bban);
+  const iban=('NL'+cd+bban);
+  ibanBox.textContent = iban.replace(/(.{4})/g,'$1 ').trim();
+});
+document.getElementById('copyIban').addEventListener('click', async ()=>{
+  const txt=(ibanBox.textContent||'').trim(); if(!txt) return;
+  try{ await navigator.clipboard.writeText(txt); const b=document.getElementById('copyIban'); const old=b.innerHTML; b.innerHTML='✔︎ Gekopieerd'; setTimeout(()=>b.innerHTML=old,1200);}catch{}
+});
+
+// ------- Search + Map (unchanged) -------
+const originBox=document.getElementById('origin'), targetBox=document.getElementById('target'), mapBox=document.getElementById('map');
+let map, markers=[], line;
+function render(doc,title){const addr=[doc.straatnaam+' '+[doc.huisnummer,doc.huisletter||'',doc.huisnummertoevoeging||''].join('').trim(), doc.postcode+' '+doc.woonplaatsnaam].join('<br>');return '<b>'+title+'</b><br>'+addr;}
+document.getElementById('btnFind').addEventListener('click', async ()=>{
+  const pc=normPC(document.getElementById('pc').value);
+  const hn=document.getElementById('hn').value.trim();
+  if(!/^\d{4}[A-Z]{2}$/.test(pc) || !/^\d{1,5}$/.test(hn)){ alert('Gebruik een geldige postcode (1234AB) en huisnummer'); return; }
+  const start=await pdokFree(pc,hn);
+  if(!start){ alert('Adres niet gevonden'); return; }
+  const p=parseLL(start.centroide_ll);
+  originBox.innerHTML=render(start,'Invoeradres'); originBox.classList.remove('hidden');
+  const hit=await findInRange(p,minKm,maxKm);
+  if(!hit){ alert('Geen adres in bereik (probeer groter bereik)'); return; }
+  targetBox.innerHTML=render(hit.doc,'Gevonden adres')+'<div class="label-below">afstand: <span class="mono">'+(hit.dist*1000).toFixed(0)+' m</span></div>';
+  targetBox.classList.remove('hidden');
+  if(!map){ map=L.map('map'); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OSM'}).addTo(map); }
+  markers.forEach(m=>m.remove()); markers=[]; if(line){line.remove()}
+  const a=[p.lat,p.lon], b=[hit.pt.lat,hit.pt.lon];
+  markers.push(L.marker(a).addTo(map).bindPopup('Invoeradres'));
+  markers.push(L.marker(b).addTo(map).bindPopup('Gevonden adres'));
+  line=L.polyline([a,b],{color:'#3b82f6'}).addTo(map);
+  const bounds=L.latLngBounds([a,b]).pad(0.25);
+  mapBox.classList.remove('hidden');
+  setTimeout(()=>{ map.invalidateSize(); map.fitBounds(bounds,{padding:[20,20],maxZoom:17}); },0);
+});
+
+// ------- Admin (long-press) -------
+const ADMIN_PASS="Welkom02!";
+const title=document.getElementById('appTitle'); const admin=document.getElementById('admin');
+let pressTimer, pressed=false;
+function toggleAdmin(){ if(admin.style.display==='block'){ admin.style.display='none'; return; } const p=prompt('Wachtwoord?'); if(p===ADMIN_PASS){ document.getElementById('curUrl').value=location.href; admin.style.display='block'; } else if(p!==null){ alert('Onjuist wachtwoord'); } }
+['mousedown','touchstart'].forEach(ev=> title.addEventListener(ev,()=>{ pressed=true; pressTimer=setTimeout(()=>{ if(pressed) toggleAdmin(); }, 1000); }));
+['mouseup','mouseleave','touchend','touchcancel'].forEach(ev=> title.addEventListener(ev,()=>{ pressed=false; clearTimeout(pressTimer); }));
+</script>
+</body>
+</html>
