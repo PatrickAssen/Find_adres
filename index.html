@@ -7,10 +7,7 @@
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
-:root{
-  --bg:#0b1220;--card:#0f172a;--fg:#e2e8f0;--muted:#94a3b8;
-  --brand:#3b82f6;--range:#2563eb;--rangeBg:#1f2937;
-}
+:root{--bg:#0b1220;--card:#0f172a;--fg:#e2e8f0;--muted:#94a3b8;--brand:#3b82f6;--range:#2563eb;--rangeBg:#1f2937;}
 *{box-sizing:border-box}
 body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto;background:var(--bg);color:var(--fg)}
 .wrap{max-width:960px;margin:0 auto;padding:20px}
@@ -21,25 +18,28 @@ h1{margin:0;cursor:pointer;user-select:none}
 .field{margin-bottom:14px}
 input,button,select{width:100%;padding:12px;border-radius:10px;border:1px solid #333;background:#0b1220;color:#fff;font-size:15px}
 button{background:var(--brand);border:0;font-weight:700;cursor:pointer}
-.label-below{font-size:13px;color:var(--muted);margin-top:6px}
-
-/* Slider (custom, no thumbs) */
+.label-below{font-size:13px;color:#94a3b8;margin-top:6px}
 .range-wrap{margin:10px 0}
 .range-track{position:relative;height:14px;border-radius:14px;background:var(--rangeBg);}
 .range-fill{position:absolute;top:0;bottom:0;border-radius:14px;background:var(--range)}
 .range-hit{position:absolute;left:0;top:0;right:0;bottom:0;cursor:ew-resize}
-.range-info{display:flex;justify-content:space-between;color:var(--muted);font-size:13px;margin-top:8px}
-
+.range-info{display:flex;justify-content:space-between;color:#94a3b8;font-size:13px;margin-top:8px}
 .result{padding:12px;border:1px dashed #444;margin-top:8px;border-radius:10px}
 #map{height:320px;margin-top:12px;border-radius:12px}
 .hidden{display:none}
 .row{display:flex;gap:10px;align-items:center}
 .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
 .admin{display:none;background:#0b1220;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:12px;margin-top:12px}
-
-/* Copy button */
 .copybtn{background:none;border:1px solid #334155;color:#e2e8f0;cursor:pointer;border-radius:8px;padding:6px 8px;display:inline-flex;align-items:center;gap:6px}
 .copybtn svg{width:14px;height:14px;vertical-align:middle}
+
+/* Share modal */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:1000}
+.modal .sheet{background:var(--card);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:14px;width:320px;max-width:90vw}
+.modal h3{margin:0 0 10px 0;font-size:16px}
+.modal .btns{display:flex;flex-direction:column;gap:8px}
+.modal .btns button{width:100%}
+.modal .close{position:absolute;top:12px;right:12px;background:#111827;border:1px solid #334155;border-radius:10px;color:#e5e7eb;padding:6px 8px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -86,7 +86,6 @@ button{background:var(--brand);border:0;font-weight:700;cursor:pointer}
       </div>
       <button id="btnGen" style="flex:1;min-width:0">Genereer</button>
     </div>
-    <!-- IBAN direct onder het keuzeveld tonen zoals v6 -->
     <div id="ibanBox" class="mono" style="margin-top:8px;white-space:nowrap;overflow-x:auto" aria-live="polite"></div>
     <div class="row" style="margin-top:6px">
       <button id="copyIban" class="copybtn" title="Kopieer IBAN">
@@ -100,9 +99,24 @@ button{background:var(--brand);border:0;font-weight:700;cursor:pointer}
   </section>
 </div>
 
+<!-- Share chooser modal -->
+<div id="shareModal" class="modal" aria-hidden="true">
+  <button id="shareClose" class="close" aria-label="Sluiten">✕</button>
+  <div class="sheet">
+    <h3>Deel link</h3>
+    <div id="shareUrl" class="mono" style="font-size:12px;color:#94a3b8;margin-bottom:10px;overflow:auto;white-space:nowrap"></div>
+    <div class="btns">
+      <button id="shareSystem">Systeem delen</button>
+      <button id="shareWhatsApp">WhatsApp</button>
+      <button id="shareMail">E‑mail</button>
+      <button id="shareCopy" class="copybtn">Kopieer link</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-// -------- Range (custom drag, no thumbs) --------
+// -------- Range (custom drag) --------
 let minKm=5, maxKm=15;
 const MIN=0, MAX=50, STEP=1;
 const track=document.getElementById('track');
@@ -126,9 +140,9 @@ function renderRange(){
   minVal.textContent=minKm;
   maxVal.textContent=maxKm;
 }
-let dragging=null; // 'min' | 'max'
+let dragging=null;
 function onPointerDown(e){
-  const clientX = (e.touches && e.touches[0]?.clientX) || e.clientX;
+  const clientX=(e.touches && e.touches[0].clientX) || e.clientX;
   const v=valFromX(clientX);
   const chooseMin = Math.abs(v-minKm) <= Math.abs(v-maxKm);
   dragging = chooseMin ? 'min' : 'max';
@@ -138,7 +152,7 @@ function onPointerDown(e){
 }
 function updateDrag(e){
   if(!dragging) return;
-  const clientX = (e.touches && e.touches[0]?.clientX) || e.clientX;
+  const clientX=(e.touches && e.touches[0].clientX) || e.clientX;
   const v=valFromX(clientX);
   if(dragging==='min'){ minKm = Math.min(v, maxKm); }
   else{ maxKm = Math.max(v, minKm); }
@@ -184,7 +198,7 @@ async function findInRange(o,min,max){
   return null;
 }
 
-// ------- IBAN (v6-stijl weergave, verder ongewijzigd) -------
+// ------- IBAN (v6-stijl) -------
 const banks=["RABO","INGB","ABNA","TRIO","SNSB","DEUT","BNPA","BNGH","BOFA"];
 document.getElementById('bank').innerHTML=banks.map(b=>`<option value="${b}">${b}</option>`).join('');
 function elf10(){function ok(ds){const w=[10,9,8,7,6,5,4,3,2,1];return ds.reduce((s,d,i)=>s+d*w[i],0)%11===0}
@@ -204,7 +218,7 @@ document.getElementById('copyIban').addEventListener('click', async ()=>{
   try{ await navigator.clipboard.writeText(txt); const b=document.getElementById('copyIban'); const old=b.innerHTML; b.innerHTML='✔︎ Gekopieerd'; setTimeout(()=>b.innerHTML=old,1200);}catch{}
 });
 
-// ------- Search + Map (unchanged) -------
+// ------- Search + Map -------
 const originBox=document.getElementById('origin'), targetBox=document.getElementById('target'), mapBox=document.getElementById('map');
 let map, markers=[], line;
 function render(doc,title){const addr=[doc.straatnaam+' '+[doc.huisnummer,doc.huisletter||'',doc.huisnummertoevoeging||''].join('').trim(), doc.postcode+' '+doc.woonplaatsnaam].join('<br>');return '<b>'+title+'</b><br>'+addr;}
@@ -231,13 +245,68 @@ document.getElementById('btnFind').addEventListener('click', async ()=>{
   setTimeout(()=>{ map.invalidateSize(); map.fitBounds(bounds,{padding:[20,20],maxZoom:17}); },0);
 });
 
-// ------- Admin (long-press) -------
+// ------- Admin (long-press + share chooser) -------
 const ADMIN_PASS="Welkom02!";
 const title=document.getElementById('appTitle'); const admin=document.getElementById('admin');
 let pressTimer, pressed=false;
 function toggleAdmin(){ if(admin.style.display==='block'){ admin.style.display='none'; return; } const p=prompt('Wachtwoord?'); if(p===ADMIN_PASS){ document.getElementById('curUrl').value=location.href; admin.style.display='block'; } else if(p!==null){ alert('Onjuist wachtwoord'); } }
 ['mousedown','touchstart'].forEach(ev=> title.addEventListener(ev,()=>{ pressed=true; pressTimer=setTimeout(()=>{ if(pressed) toggleAdmin(); }, 1000); }));
 ['mouseup','mouseleave','touchend','touchcancel'].forEach(ev=> title.addEventListener(ev,()=>{ pressed=false; clearTimeout(pressTimer); }));
+
+// Copy button (works)
+document.getElementById('btnCopy').addEventListener('click', async ()=>{
+  const url=document.getElementById('curUrl').value || location.href;
+  try{ await navigator.clipboard.writeText(url); alert('URL gekopieerd'); }catch(e){
+    const inp=document.getElementById('curUrl'); inp.select(); document.execCommand && document.execCommand('copy');
+  }
+});
+
+// Share chooser wiring
+const shareModal=document.getElementById('shareModal');
+const shareUrlEl=document.getElementById('shareUrl');
+const shareClose=document.getElementById('shareClose');
+function openShare(){
+  const url=(document.getElementById('curUrl').value||location.href);
+  shareUrlEl.textContent=url;
+  shareModal.style.display='flex';
+}
+function closeShare(){ shareModal.style.display='none'; }
+document.getElementById('btnShare').addEventListener('click', openShare);
+shareClose.addEventListener('click', closeShare);
+shareModal.addEventListener('click', (e)=>{ if(e.target===shareModal) closeShare(); });
+function currentUrl(){ return (document.getElementById('curUrl').value||location.href); }
+
+document.getElementById('shareSystem').addEventListener('click', async ()=>{
+  const url=currentUrl();
+  const data={title:'adreszoeker', text:'Link naar adreszoeker', url};
+  if(navigator.share){
+    try{ await navigator.share(data); closeShare(); }catch(e){ /* user canceled */ }
+  }else{
+    alert('Systeem delen niet ondersteund. Kies WhatsApp, E‑mail of Kopieer.');
+  }
+});
+
+document.getElementById('shareWhatsApp').addEventListener('click', ()=>{
+  const url=currentUrl();
+  const txt=encodeURIComponent('Link naar adreszoeker: '+url);
+  const isMobile=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  const wa=isMobile ? 'https://wa.me/?text=' : 'https://web.whatsapp.com/send?text=';
+  window.open(wa+txt, '_blank');
+  closeShare();
+});
+
+document.getElementById('shareMail').addEventListener('click', ()=>{
+  const url=currentUrl();
+  const mail='mailto:?subject='+encodeURIComponent('Link adreszoeker')+'&body='+encodeURIComponent('Hierbij de link: '+url);
+  window.location.href=mail;
+  closeShare();
+});
+
+document.getElementById('shareCopy').addEventListener('click', async ()=>{
+  const url=currentUrl();
+  try{ await navigator.clipboard.writeText(url); alert('URL gekopieerd'); }catch(e){}
+  closeShare();
+});
 </script>
 </body>
 </html>
